@@ -6,7 +6,7 @@ load_dotenv()
 
 
 class Settings:
-    # API Keys
+    # api Keys
     GEMINI_API_KEY: str = os.getenv("GEMINI_API_KEY")
 
     # Model Settings

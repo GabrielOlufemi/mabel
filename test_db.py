@@ -1,4 +1,5 @@
 # test_db.py
+# redundant, just used this to ensure db works properly when porting to another system
 from app.db.database import engine, init_db
 from sqlalchemy import text
 
@@ -7,11 +8,11 @@ def test():
     
     with engine.connect() as conn:
         result = conn.execute(text("SELECT 1"))
-        print("✅ DB connected:", result.fetchone())
+        print("DB connected:", result.fetchone())
         
         # also confirm the users table was created
         result = conn.execute(text("SELECT name FROM sqlite_master WHERE type='table'"))
         tables = [row[0] for row in result.fetchall()]
-        print("✅ Tables found:", tables)
+        print("Tables found:", tables)
 
 test()

@@ -21,7 +21,7 @@ ALGORITHM = settings.JWT_ALGORITHM
 TOKEN_EXPIRE_MINUTES = settings.TOKEN_EXPIRE_MINUTES
 
 
-# ── Schemas ──────────────────────────────────────────────
+#  Schemas
 class RegisterRequest(BaseModel):
     first_name: str
     last_name: str
@@ -46,7 +46,7 @@ class UpdateProfileRequest(BaseModel):
     email: EmailStr
 
 
-# ── Helpers ──────────────────────────────────────────────
+# Helpers 
 def create_token(user_id: str) -> str:
     payload = {
         "sub": user_id,
@@ -66,7 +66,7 @@ def verify_token(credentials: HTTPAuthorizationCredentials = Depends(security)) 
         raise HTTPException(401, "Invalid or expired token")
 
 
-# ── Routes ───────────────────────────────────────────────
+# Routes 
 @auth_router.post("/register", response_model=AuthResponse)
 async def register(request: RegisterRequest, db: Session = Depends(get_db)):
     if db.query(User).filter(User.email == request.email).first():

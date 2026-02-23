@@ -11,9 +11,7 @@ logger = logging.getLogger(__name__)
 admin_router = APIRouter()
 
 
-# ── Collections ───────────────────────────────────────────────────────────────
-
-
+# collections 
 @admin_router.get("/collections")
 async def list_all_collections(user_id: str = Depends(verify_token)):
     """List all collections in ChromaDB"""
@@ -120,8 +118,7 @@ async def test_search(
         raise HTTPException(500, str(e))
 
 
-# ── Conversation history ──────────────────────────────────────────────────────
-
+# conversation history per user
 
 @admin_router.get("/conversations/{target_user_id}")
 async def list_user_conversations(

@@ -4,6 +4,7 @@ from docx import Document
 from typing import List, Dict, Any
 import logging
 
+# note to self - implement image analysis later
 # utility importing
 from .utils import chunk_text
 

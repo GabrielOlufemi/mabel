@@ -7,7 +7,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-# ── Client init — fail loudly if key is missing ───────────────────
+# Client initialization, should fail loudly if key is missing 
 if not settings.GEMINI_API_KEY:
     raise RuntimeError("GEMINI_API_KEY is not set. Check your .env file.")
 
@@ -187,7 +187,7 @@ def generate_response(query: str, context: str, history: List[Dict] = None) -> s
 
     except Exception as e:
         logger.error(f"generate_response failed. Error: {e}", exc_info=True)
-        raise  # ← re-raise so chat.py returns a proper 500 instead of a fake success
+        raise  # re-raise so chat.py returns a proper 500 instead of a fake success
 
 
 def _format_history(history: List[Dict]) -> str:

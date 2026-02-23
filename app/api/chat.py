@@ -6,6 +6,7 @@ from typing import Optional, List, Dict, Any
 from app.services.embedding_service import get_embedding_service
 from app.db.vector_store import get_vector_store
 from app.services.utils import clean_text
+# llm stuff 
 from app.services.llm_utils import (
     rewrite_query,
     classify_query,
@@ -13,6 +14,7 @@ from app.services.llm_utils import (
     generate_conversational_response,
     generate_general_response,
 )
+# reranker import 
 from app.services.reranker import get_reranker
 from app.config import settings
 from app.api.auth import verify_token
@@ -23,7 +25,7 @@ import uuid
 logger = logging.getLogger(__name__)
 chat_router = APIRouter()
 
-
+# request + response schemas 
 class ChatRequest(BaseModel):
     query: str = Field(description="Original user query")
     links: Optional[List[str]] = Field(
@@ -46,16 +48,14 @@ class ChatResponse(BaseModel):
 @chat_router.post("/")
 async def chat(request: ChatRequest, user_id: str = Depends(verify_token)):
     """
-    Main chat endpoint with intelligent routing and conversation memory.
+    Main chat endpoint with intelligent routing and conversation memory (semi-finished).
 
-    Flow:
+    Expected program flow :
     1. Classify query type
     2. Retrieve conversation history for context
-    3. Conversational -> respond directly
-    4. Otherwise -> search vector store
-    5. Good similarity -> RAG response with history
-    6. Weak/no results -> general knowledge with history
-    7. Save turn to conversation history
+    3. Conversational ? respond directly : search vector store
+    4. Good similarity ? RAG response with history : general knowledge with history
+    5. Save turn to conversation history
     """
     try:
         if not request.query.strip():
@@ -81,7 +81,7 @@ async def chat(request: ChatRequest, user_id: str = Depends(verify_token)):
             f"Retrieved {len(history)} previous turns for conversation {conversation_id}"
         )
 
-        # Step 3: Conversational, we skip RAG
+        # Conversational
         if query_type == "conversational":
             response_text = generate_conversational_response(
                 cleaned_query, history=history
@@ -105,7 +105,7 @@ async def chat(request: ChatRequest, user_id: str = Depends(verify_token)):
                 sources=[],
             )
 
-        #  Step 4: Rewrite and search 
+        # Rewrite and search 
         rewritten_query = rewrite_query(cleaned_query)
         logger.info(f"Rewritten query: {rewritten_query}")
 
@@ -119,7 +119,7 @@ async def chat(request: ChatRequest, user_id: str = Depends(verify_token)):
             file_ids=request.active_document_ids or [],
         )
 
-        #  If no results, we use general knowledge
+        #  if no results, utlize general knowledge
         if not search_results or len(search_results) == 0:
             logger.info(f"No documents found, falling back to general knowledge")
             response_text = generate_general_response(request.query, history=history)
@@ -144,7 +144,7 @@ async def chat(request: ChatRequest, user_id: str = Depends(verify_token)):
                 sources=[],
             )
 
-        # We Check similarity threshold 
+        # we check similarity threshold 
         top_score = search_results[0].get("similarity_score", 0.0)
         logger.info(
             f"Top similarity score: {top_score:.3f} (threshold: {settings.SIMILARITY_THRESHOLD})"
