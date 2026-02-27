@@ -19,8 +19,10 @@ from app.api.upload import upload_router
 from app.api.chat import chat_router
 from app.api.admin import admin_router
 from app.api.conversations import conversations_router
+from app.api.study import study_router
 
 logger = logging.getLogger(__name__)
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -53,7 +55,7 @@ app = FastAPI(
     title="Mabel",
     description="AI Powered RAG centric Study Support System.",
     version="1.0",
-    lifespan=lifespan
+    lifespan=lifespan,
 )
 
 allowed_origins = [
@@ -73,12 +75,18 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
 @app.get("/")
 async def root():
     return {"message": "Mabel API is running", "version": "1.0", "status": "healthy"}
 
-app.include_router(auth_router,         prefix="/api/auth",          tags=["auth"])
-app.include_router(upload_router,       prefix="/api/upload",        tags=["uploads"])
-app.include_router(admin_router,        prefix="/api/admin",         tags=["admin"])
-app.include_router(chat_router,         prefix="/api/chat",          tags=["chat"])
-app.include_router(conversations_router,prefix="/api/conversations", tags=["conversations"])
+
+app.include_router(auth_router, prefix="/api/auth", tags=["auth"])
+app.include_router(upload_router, prefix="/api/upload", tags=["uploads"])
+app.include_router(admin_router, prefix="/api/admin", tags=["admin"])
+app.include_router(chat_router, prefix="/api/chat", tags=["chat"])
+app.include_router(
+    conversations_router, prefix="/api/conversations", tags=["conversations"]
+)
+
+app.include_router(study_router, prefix="/api/study", tags="study")

@@ -199,3 +199,93 @@ def _format_history(history: List[Dict]) -> str:
         lines.append(f"User: {turn.get('user', '')}")
         lines.append(f"Assistant: {turn.get('assistant', '')}")
     return "\n".join(lines)
+
+
+# ── Add this function to app/services/llm_utils.py ───────────────────────────
+
+def generate_flashcards(chunks: list[str], filename: str = "document", card_count: int = 8) -> list[dict]:
+    """
+    Generate flashcards from reconstructed document chunks.
+
+    Args:
+        chunks: Ordered list of text chunks (reconstructed from ChromaDB by chunk_index)
+        filename: Original filename, used for logging context
+        card_count: Number of cards to generate (default 8)
+
+    Returns:
+        List of dicts: [{"q": "...", "a": "..."}, ...]
+
+    Raises:
+        ValueError: If Gemini returns unparseable or malformed JSON
+        Exception: Re-raised from _call_gemini on API failure
+    """
+    import json
+
+    if not chunks:
+        raise ValueError("No chunks provided for flashcard generation")
+
+    # Join chunks back into readable text — same order they were stored
+    document_text = "\n\n".join(chunks)
+
+    # Truncate if massive — Gemini 2.5 flash handles ~1M tokens but be reasonable
+    max_chars = 80_000
+    if len(document_text) > max_chars:
+        logger.warning(
+            f"Document text truncated from {len(document_text)} to {max_chars} chars for flashcard generation"
+        )
+        document_text = document_text[:max_chars]
+
+    system_instruction = (
+        "You are a study assistant that generates high-quality flashcards to help students learn. "
+        "Your flashcards must test understanding of CONCEPTS, FACTS, DEFINITIONS, and IDEAS found in the document. "
+        "STRICTLY IGNORE any of the following — they are document metadata, not study content: "
+        "file names, file sizes, submission IDs, dates, deadlines, form fields, author names, "
+        "page numbers, headers, footers, timestamps, version numbers, and any administrative details. "
+        "If the document contains very little actual study content, generate the best cards you can from what exists. "
+        "Do not use emojis. Return ONLY valid JSON — no markdown, no backticks, no preamble."
+    )
+
+    prompt = (
+        f'Generate exactly {card_count} flashcards from the STUDY CONTENT of the following document: "{filename}"\n\n'
+        "Each question should test meaningful understanding — not trivia about the document itself.\n"
+        "Good question: 'What is the purpose of X?' / 'How does Y work?' / 'Define Z'\n"
+        "Bad question: 'What is the submission date?' / 'What is the file name?' / 'What is the document ID?'\n\n"
+        "Return ONLY a JSON array in this exact format:\n"
+        '[{"q": "question text", "a": "answer text"}, ...]\n\n'
+        "Document content:\n"
+        f"{document_text}"
+    )
+
+    try:
+        raw = _call_gemini(system_instruction, prompt, temperature=0.2)
+
+        # Strip accidental markdown fences if Gemini includes them anyway
+        cleaned = raw.strip().lstrip("```json").lstrip("```").rstrip("```").strip()
+
+        cards = json.loads(cleaned)
+
+        if not isinstance(cards, list):
+            raise ValueError(f"Expected JSON array, got {type(cards)}")
+
+        # Validate each card has q and a
+        validated = []
+        for i, card in enumerate(cards):
+            if not isinstance(card, dict) or "q" not in card or "a" not in card:
+                logger.warning(f"Skipping malformed card at index {i}: {card}")
+                continue
+            validated.append({"q": str(card["q"]).strip(), "a": str(card["a"]).strip()})
+
+        if not validated:
+            raise ValueError("No valid cards parsed from Gemini response")
+
+        if len(validated) != card_count:
+            logger.warning(
+                f"Expected {card_count} flashcards, got {len(validated)} for file '{filename}'"
+            )
+
+        logger.info(f"Generated {len(validated)} flashcards for '{filename}'")
+        return validated
+
+    except json.JSONDecodeError as e:
+        logger.error(f"Failed to parse flashcard JSON for '{filename}': {e}\nRaw response: {raw[:500]}")
+        raise ValueError(f"Gemini returned invalid JSON: {e}")

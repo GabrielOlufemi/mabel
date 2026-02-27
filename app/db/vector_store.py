@@ -24,7 +24,9 @@ class VectorStore:
             persist_directory = settings.VECTOR_STORE_PATH
 
         try:
-            logger.info(f"Initializing ChromaDB with persist directory: {persist_directory}")
+            logger.info(
+                f"Initializing ChromaDB with persist directory: {persist_directory}"
+            )
             Path(persist_directory).mkdir(parents=True, exist_ok=True)
 
             self.client = chromadb.PersistentClient(
@@ -35,7 +37,9 @@ class VectorStore:
             embedding_service = get_embedding_service()
             self.embedding_dim = embedding_service.embedding_dim
 
-            logger.info(f"ChromaDB initialized. Embedding dimension: {self.embedding_dim}")
+            logger.info(
+                f"ChromaDB initialized. Embedding dimension: {self.embedding_dim}"
+            )
 
         except Exception as e:
             logger.error(f"Failed to initialize ChromaDB: {e}")
@@ -49,7 +53,10 @@ class VectorStore:
         try:
             collection = self.client.get_or_create_collection(
                 name=collection_name,
-                metadata={"user_id": user_id, "embedding_dimension": self.embedding_dim},
+                metadata={
+                    "user_id": user_id,
+                    "embedding_dimension": self.embedding_dim,
+                },
             )
             return collection
         except Exception as e:
@@ -89,7 +96,9 @@ class VectorStore:
                     metadata.update(additional_metadata)
                 metadatas.append(metadata)
 
-            collection.add(ids=ids, documents=chunks, embeddings=embeddings, metadatas=metadatas)
+            collection.add(
+                ids=ids, documents=chunks, embeddings=embeddings, metadatas=metadatas
+            )
             logger.info(f"Successfully added {len(chunks)} chunks for file {file_id}")
             return len(chunks)
 
@@ -134,13 +143,15 @@ class VectorStore:
             formatted_results = []
             if results["ids"] and results["ids"][0]:
                 for idx in range(len(results["ids"][0])):
-                    formatted_results.append({
-                        "id": results["ids"][0][idx],
-                        "chunk_text": results["documents"][0][idx],
-                        "metadata": results["metadatas"][0][idx],
-                        "distance": results["distances"][0][idx],
-                        "similarity_score": 1 - (results["distances"][0][idx] / 2),
-                    })
+                    formatted_results.append(
+                        {
+                            "id": results["ids"][0][idx],
+                            "chunk_text": results["documents"][0][idx],
+                            "metadata": results["metadatas"][0][idx],
+                            "distance": results["distances"][0][idx],
+                            "similarity_score": 1 - (results["distances"][0][idx] / 2),
+                        }
+                    )
 
             logger.info(f"Found {len(formatted_results)} matches")
             return formatted_results
@@ -226,7 +237,9 @@ class VectorStore:
             )
             return collection
         except Exception as e:
-            logger.error(f"Error getting conversation collection for user {user_id}: {e}")
+            logger.error(
+                f"Error getting conversation collection for user {user_id}: {e}"
+            )
             raise
 
     def save_conversation_turn(
@@ -236,6 +249,7 @@ class VectorStore:
         user_message: str,
         assistant_message: str,
         turn_index: int,
+        sources: Optional[List[Dict]] = None,  # ← NEW
     ) -> bool:
         """
         Save a single conversation turn (user + assistant message pair).
@@ -246,6 +260,7 @@ class VectorStore:
             user_message: What the user said
             assistant_message: What the assistant responded
             turn_index: Turn number in the conversation (0, 1, 2...)
+            sources: Optional list of reranked source dicts to persist alongside the turn
 
         Returns:
             True if saved successfully
@@ -255,17 +270,19 @@ class VectorStore:
 
             turn_id = f"{conversation_id}_turn_{turn_index}"
 
-            # Store both messages as a JSON blob in the document field
-            turn_data = json.dumps({
-                "user": user_message,
-                "assistant": assistant_message,
-            })
+            turn_data = json.dumps(
+                {
+                    "user": user_message,
+                    "assistant": assistant_message,
+                }
+            )
 
             metadata = {
                 "conversation_id": conversation_id,
                 "user_id": user_id,
                 "turn_index": turn_index,
                 "timestamp": int(time.time()),
+                "sources_json": json.dumps(sources or []),  # ← NEW
             }
 
             collection.add(
@@ -297,7 +314,7 @@ class VectorStore:
 
         Returns:
             List of turn dicts sorted oldest to newest:
-            [{"user": "...", "assistant": "...", "turn_index": 0}, ...]
+            [{"user": "...", "assistant": "...", "turn_index": 0, "sources": [...]}, ...]
         """
         try:
             collection = self.get_conversation_collection(user_id)
@@ -313,10 +330,12 @@ class VectorStore:
             turns = []
             for i in range(len(results["ids"])):
                 turn_data = json.loads(results["documents"][i])
-                turn_data["turn_index"] = results["metadatas"][i]["turn_index"]
+                meta = results["metadatas"][i]
+                turn_data["turn_index"] = meta["turn_index"]
+                # ── NEW: restore sources from metadata ──────────────────────
+                turn_data["sources"] = json.loads(meta.get("sources_json", "[]"))
                 turns.append(turn_data)
 
-            # sort by turn_index oldest first, take last N
             turns.sort(key=lambda t: t["turn_index"])
             return turns[-last_n:]
 
