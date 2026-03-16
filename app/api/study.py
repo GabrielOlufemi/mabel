@@ -7,20 +7,23 @@ import logging
 import json
 
 from app.db.database import get_db
-from app.db.models import FlashcardDeck
+from app.db.models import FlashcardDeck, SummaryResult
 from app.db.vector_store import get_vector_store
-from app.services.llm_utils import generate_flashcards
+from app.services.llm_utils import generate_flashcards, generate_quiz, generate_summary
 from app.api.auth import verify_token
 
 logger = logging.getLogger(__name__)
 study_router = APIRouter()
 
 
-# schema shit
+# ── Shared schemas ─────────────────────────────────────────────────────────────
+
 class FlashcardCard(BaseModel):
     q: str
     a: str
 
+
+# ── Flashcard schemas ──────────────────────────────────────────────────────────
 
 class GenerateRequest(BaseModel):
     file_id: str
@@ -30,7 +33,7 @@ class GenerateRequest(BaseModel):
 
 
 class GenerateResponse(BaseModel):
-    deck_id: Optional[str] = None           # None if save=False
+    deck_id: Optional[str] = None
     file_id: str
     title: str
     cards: List[FlashcardCard]
@@ -42,7 +45,7 @@ class DeckSummary(BaseModel):
     title: str
     file_id: Optional[str]
     card_count: int
-    created_at: int # unix type integer
+    created_at: int
 
 
 class DecksListResponse(BaseModel):
@@ -58,12 +61,39 @@ class DeckDetailResponse(BaseModel):
     created_at: int
 
 
-# helper functions -- too lazy to createa new file 
+# ── Quiz schemas ───────────────────────────────────────────────────────────────
+
+class QuizOption(BaseModel):
+    """One multiple-choice option."""
+    text: str
+
+
+class QuizQuestion(BaseModel):
+    q: str
+    options: List[str]   # exactly 4 option strings
+    answer: int          # 0-based index of the correct option
+    explanation: Optional[str] = None
+
+
+class QuizGenerateRequest(BaseModel):
+    file_id: str
+    filename: Optional[str] = "document"
+    question_count: int = Field(default=6, ge=3, le=20)
+
+
+class QuizGenerateResponse(BaseModel):
+    file_id: str
+    title: str
+    questions: List[QuizQuestion]
+    question_count: int
+
+
+# ── Shared helper ──────────────────────────────────────────────────────────────
+
 def _reconstruct_chunks_from_store(user_id: str, file_id: str) -> tuple[list[str], str]:
     """
     Pull all stored chunks for a file_id back out of ChromaDB,
     sort by chunk_index, and return (ordered_chunks, filename).
-
     Raises HTTPException 404 if no chunks found.
     """
     vector_store = get_vector_store()
@@ -77,7 +107,6 @@ def _reconstruct_chunks_from_store(user_id: str, file_id: str) -> tuple[list[str
     if not results["ids"]:
         raise HTTPException(404, f"No document found with file_id '{file_id}' for this user")
 
-    # Pair each chunk with its index so we can sort
     paired = []
     filename = "document"
     for i, doc in enumerate(results["documents"]):
@@ -89,13 +118,12 @@ def _reconstruct_chunks_from_store(user_id: str, file_id: str) -> tuple[list[str
     paired.sort(key=lambda x: x[0])
     ordered_chunks = [text for _, text in paired]
 
-    logger.info(
-        f"Reconstructed {len(ordered_chunks)} chunks for file_id '{file_id}' ('{filename}')"
-    )
+    logger.info(f"Reconstructed {len(ordered_chunks)} chunks for file_id '{file_id}' ('{filename}')")
     return ordered_chunks, filename
 
 
-# relevant routes
+# ── Flashcard routes ───────────────────────────────────────────────────────────
+
 @study_router.post("/flashcards/generate", response_model=GenerateResponse)
 async def generate_deck(
     request: GenerateRequest,
@@ -103,21 +131,15 @@ async def generate_deck(
     db: Session = Depends(get_db),
 ):
     """
-    Generate x flashcards from a previously uploaded document.
-
-    Reconstructs the document text from its stored ChromaDB chunks,
-    sends it to Gemini and optionally persists the deck to SQLite.
+    Generate flashcards from a previously uploaded document.
+    Reconstructs text from ChromaDB chunks, sends to Gemini,
+    and optionally persists the deck to SQLite.
     """
     try:
-        # Rebuild text from stored chunks
         chunks, filename = _reconstruct_chunks_from_store(user_id, request.file_id)
-
-        # Use frontend-supplied filename if provided, fallback to what's in metadata
         display_name = request.filename if request.filename != "document" else filename
 
-        # Generate via Gemini
         cards = generate_flashcards(chunks, filename=display_name, card_count=request.card_count)
-
         title = display_name
 
         deck_id = None
@@ -146,7 +168,6 @@ async def generate_deck(
     except HTTPException:
         raise
     except ValueError as e:
-        # Gemini JSON parse failures etc.
         logger.error(f"Flashcard generation value error: {e}")
         raise HTTPException(422, str(e))
     except Exception as e:
@@ -167,7 +188,6 @@ async def list_decks(
             .order_by(FlashcardDeck.created_at.desc())
             .all()
         )
-
         return DecksListResponse(
             decks=[
                 DeckSummary(
@@ -191,19 +211,17 @@ async def get_deck(
     user_id: str = Depends(verify_token),
     db: Session = Depends(get_db),
 ):
-    """Retrieve a saved deck by ID — used to restore a session without regenerating."""
+    """Retrieve a saved deck by ID."""
     try:
         deck = (
             db.query(FlashcardDeck)
             .filter(FlashcardDeck.id == deck_id, FlashcardDeck.user_id == user_id)
             .first()
         )
-
         if not deck:
             raise HTTPException(404, "Deck not found")
 
         cards = json.loads(deck.cards_json)
-
         return DeckDetailResponse(
             deck_id=deck.id,
             title=deck.title,
@@ -232,13 +250,11 @@ async def delete_deck(
             .filter(FlashcardDeck.id == deck_id, FlashcardDeck.user_id == user_id)
             .first()
         )
-
         if not deck:
             raise HTTPException(404, "Deck not found")
 
         db.delete(deck)
         db.commit()
-
         logger.info(f"Deleted deck '{deck_id}' for user '{user_id}'")
         return {"deleted": True, "deck_id": deck_id}
 
@@ -247,3 +263,207 @@ async def delete_deck(
     except Exception as e:
         logger.error(f"Error deleting deck {deck_id}: {e}", exc_info=True)
         raise HTTPException(500, f"Error deleting deck: {str(e)}")
+
+
+# ── Quiz routes ────────────────────────────────────────────────────────────────
+
+@study_router.post("/quiz/generate", response_model=QuizGenerateResponse)
+async def generate_quiz_endpoint(
+    request: QuizGenerateRequest,
+    user_id: str = Depends(verify_token),
+):
+    """
+    Generate a multiple-choice quiz from a previously uploaded document.
+    Reconstructs text from ChromaDB chunks and sends to Gemini.
+    Quizzes are stateless — they are not persisted to the database.
+    """
+    try:
+        chunks, filename = _reconstruct_chunks_from_store(user_id, request.file_id)
+        display_name = request.filename if request.filename != "document" else filename
+
+        questions = generate_quiz(
+            chunks,
+            filename=display_name,
+            question_count=request.question_count,
+        )
+
+        return QuizGenerateResponse(
+            file_id=request.file_id,
+            title=display_name,
+            questions=[QuizQuestion(**q) for q in questions],
+            question_count=len(questions),
+        )
+
+    except HTTPException:
+        raise
+    except ValueError as e:
+        logger.error(f"Quiz generation value error: {e}")
+        raise HTTPException(422, str(e))
+    except Exception as e:
+        logger.error(f"Error generating quiz: {e}", exc_info=True)
+        raise HTTPException(500, f"Error generating quiz: {str(e)}")
+
+
+# ── Summarize schemas ──────────────────────────────────────────────────────────
+
+class SummaryStyle(str):
+    bullets   = 'bullets'
+    key_terms = 'key_terms'
+
+
+class SummarizeRequest(BaseModel):
+    file_id:  str
+    filename: Optional[str] = "document"
+    style:    str = Field(default='bullets', pattern='^(bullets|key_terms)$')
+
+
+class SummarizeResponse(BaseModel):
+    summary_id: str
+    file_id:    str
+    title:      str
+    style:      str
+    content:    str
+    created_at: int
+
+
+class SummaryListResponse(BaseModel):
+    summaries: List[SummarizeResponse]
+
+
+# ── Summarize routes ───────────────────────────────────────────────────────────
+
+@study_router.post("/summarize", response_model=SummarizeResponse)
+async def create_summary(
+    request: SummarizeRequest,
+    user_id: str = Depends(verify_token),
+    db: Session = Depends(get_db),
+):
+    """
+    Generate a summary from a previously uploaded document and persist it.
+    Style must be 'bullets' or 'key_terms'.
+    """
+    try:
+        chunks, filename = _reconstruct_chunks_from_store(user_id, request.file_id)
+        display_name = request.filename if request.filename != "document" else filename
+
+        content = generate_summary(chunks, filename=display_name, style=request.style)
+
+        record = SummaryResult(
+            user_id=user_id,
+            file_id=request.file_id,
+            title=display_name,
+            style=request.style,
+            content=content,
+        )
+        db.add(record)
+        db.commit()
+        db.refresh(record)
+        logger.info(f"Saved summary '{record.id}' for user '{user_id}'")
+
+        return SummarizeResponse(
+            summary_id=record.id,
+            file_id=record.file_id,
+            title=record.title,
+            style=record.style,
+            content=record.content,
+            created_at=record.created_at,
+        )
+
+    except HTTPException:
+        raise
+    except ValueError as e:
+        logger.error(f"Summary generation value error: {e}")
+        raise HTTPException(422, str(e))
+    except Exception as e:
+        logger.error(f"Error generating summary: {e}", exc_info=True)
+        raise HTTPException(500, f"Error generating summary: {str(e)}")
+
+
+@study_router.get("/summaries", response_model=SummaryListResponse)
+async def list_summaries(
+    user_id: str = Depends(verify_token),
+    db: Session = Depends(get_db),
+):
+    """List all saved summaries for the authenticated user, newest first."""
+    try:
+        rows = (
+            db.query(SummaryResult)
+            .filter(SummaryResult.user_id == user_id)
+            .order_by(SummaryResult.created_at.desc())
+            .all()
+        )
+        return SummaryListResponse(
+            summaries=[
+                SummarizeResponse(
+                    summary_id=r.id,
+                    file_id=r.file_id,
+                    title=r.title,
+                    style=r.style,
+                    content=r.content,
+                    created_at=r.created_at,
+                )
+                for r in rows
+            ]
+        )
+    except Exception as e:
+        logger.error(f"Error listing summaries for user {user_id}: {e}", exc_info=True)
+        raise HTTPException(500, f"Error listing summaries: {str(e)}")
+
+
+@study_router.get("/summaries/{summary_id}", response_model=SummarizeResponse)
+async def get_summary(
+    summary_id: str,
+    user_id: str = Depends(verify_token),
+    db: Session = Depends(get_db),
+):
+    """Retrieve a saved summary by ID."""
+    try:
+        row = (
+            db.query(SummaryResult)
+            .filter(SummaryResult.id == summary_id, SummaryResult.user_id == user_id)
+            .first()
+        )
+        if not row:
+            raise HTTPException(404, "Summary not found")
+
+        return SummarizeResponse(
+            summary_id=row.id,
+            file_id=row.file_id,
+            title=row.title,
+            style=row.style,
+            content=row.content,
+            created_at=row.created_at,
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error fetching summary {summary_id}: {e}", exc_info=True)
+        raise HTTPException(500, f"Error fetching summary: {str(e)}")
+
+
+@study_router.delete("/summaries/{summary_id}")
+async def delete_summary(
+    summary_id: str,
+    user_id: str = Depends(verify_token),
+    db: Session = Depends(get_db),
+):
+    """Permanently delete a saved summary."""
+    try:
+        row = (
+            db.query(SummaryResult)
+            .filter(SummaryResult.id == summary_id, SummaryResult.user_id == user_id)
+            .first()
+        )
+        if not row:
+            raise HTTPException(404, "Summary not found")
+
+        db.delete(row)
+        db.commit()
+        logger.info(f"Deleted summary '{summary_id}' for user '{user_id}'")
+        return {"deleted": True, "summary_id": summary_id}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error deleting summary {summary_id}: {e}", exc_info=True)
+        raise HTTPException(500, f"Error deleting summary: {str(e)}")

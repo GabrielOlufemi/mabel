@@ -7,7 +7,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-# Client initialization, should fail loudly if key is missing 
+# Client initialization, should fail loudly if key is missing
 if not settings.GEMINI_API_KEY:
     raise RuntimeError("GEMINI_API_KEY is not set. Check your .env file.")
 
@@ -145,7 +145,7 @@ def generate_general_response(query: str, history: List[Dict] = None) -> str:
 
     except Exception as e:
         logger.error(f"generate_general_response failed. Error: {e}", exc_info=True)
-        raise  # ← re-raise so chat.py returns a proper 500 instead of a fake success
+        raise
 
 
 def generate_response(query: str, context: str, history: List[Dict] = None) -> str:
@@ -187,7 +187,7 @@ def generate_response(query: str, context: str, history: List[Dict] = None) -> s
 
     except Exception as e:
         logger.error(f"generate_response failed. Error: {e}", exc_info=True)
-        raise  # re-raise so chat.py returns a proper 500 instead of a fake success
+        raise
 
 
 def _format_history(history: List[Dict]) -> str:
@@ -201,33 +201,24 @@ def _format_history(history: List[Dict]) -> str:
     return "\n".join(lines)
 
 
-# ── Add this function to app/services/llm_utils.py ───────────────────────────
-
-def generate_flashcards(chunks: list[str], filename: str = "document", card_count: int = 8) -> list[dict]:
+def generate_flashcards(
+    chunks: list[str], filename: str = "document", card_count: int = 8
+) -> list[dict]:
     """
     Generate flashcards from reconstructed document chunks.
 
-    Args:
-        chunks: Ordered list of text chunks (reconstructed from ChromaDB by chunk_index)
-        filename: Original filename, used for logging context
-        card_count: Number of cards to generate (default 8)
-
     Returns:
         List of dicts: [{"q": "...", "a": "..."}, ...]
-
     Raises:
         ValueError: If Gemini returns unparseable or malformed JSON
-        Exception: Re-raised from _call_gemini on API failure
     """
     import json
 
     if not chunks:
         raise ValueError("No chunks provided for flashcard generation")
 
-    # Join chunks back into readable text — same order they were stored
     document_text = "\n\n".join(chunks)
 
-    # Truncate if massive — Gemini 2.5 flash handles ~1M tokens but be reasonable
     max_chars = 80_000
     if len(document_text) > max_chars:
         logger.warning(
@@ -258,16 +249,12 @@ def generate_flashcards(chunks: list[str], filename: str = "document", card_coun
 
     try:
         raw = _call_gemini(system_instruction, prompt, temperature=0.2)
-
-        # Strip accidental markdown fences if Gemini includes them anyway
         cleaned = raw.strip().lstrip("```json").lstrip("```").rstrip("```").strip()
-
         cards = json.loads(cleaned)
 
         if not isinstance(cards, list):
             raise ValueError(f"Expected JSON array, got {type(cards)}")
 
-        # Validate each card has q and a
         validated = []
         for i, card in enumerate(cards):
             if not isinstance(card, dict) or "q" not in card or "a" not in card:
@@ -287,5 +274,188 @@ def generate_flashcards(chunks: list[str], filename: str = "document", card_coun
         return validated
 
     except json.JSONDecodeError as e:
-        logger.error(f"Failed to parse flashcard JSON for '{filename}': {e}\nRaw response: {raw[:500]}")
+        logger.error(
+            f"Failed to parse flashcard JSON for '{filename}': {e}\nRaw response: {raw[:500]}"
+        )
         raise ValueError(f"Gemini returned invalid JSON: {e}")
+
+
+def generate_quiz(
+    chunks: list[str],
+    filename: str = "document",
+    question_count: int = 6,
+) -> list[dict]:
+    """
+    Generate multiple-choice quiz questions from reconstructed document chunks.
+
+    Returns:
+        List of dicts:
+        [{"q": "...", "options": ["A","B","C","D"], "answer": 0, "explanation": "..."}, ...]
+    Raises:
+        ValueError: If Gemini returns unparseable or malformed JSON
+    """
+    import json
+
+    if not chunks:
+        raise ValueError("No chunks provided for quiz generation")
+
+    document_text = "\n\n".join(chunks)
+
+    max_chars = 80_000
+    if len(document_text) > max_chars:
+        logger.warning(
+            f"Document text truncated from {len(document_text)} to {max_chars} chars for quiz generation"
+        )
+        document_text = document_text[:max_chars]
+
+    system_instruction = (
+        "You are a study assistant that generates high-quality multiple-choice quiz questions. "
+        "Questions must test genuine understanding of CONCEPTS, FACTS, DEFINITIONS, and IDEAS. "
+        "STRICTLY IGNORE document metadata: file names, submission IDs, dates, form fields, "
+        "author names, page numbers, headers, footers, and administrative details. "
+        "Distribute correct answers randomly across positions A, B, C, D — do not always put "
+        "the correct answer first. Make all four options plausible to prevent easy guessing. "
+        "Do not use emojis. Return ONLY valid JSON — no markdown, no backticks, no preamble."
+    )
+
+    prompt = (
+        f"Generate exactly {question_count} multiple-choice questions from the STUDY CONTENT "
+        f'of the following document: "{filename}"\n\n'
+        "Each question must have exactly 4 options and one correct answer.\n"
+        "Include a brief explanation (1-2 sentences) for why the correct answer is right.\n\n"
+        "Return ONLY a JSON array in this exact format:\n"
+        '[{"q": "Question?", "options": ["Option A", "Option B", "Option C", "Option D"], '
+        '"answer": 0, "explanation": "Reason why Option A is correct."}, ...]\n\n'
+        "The 'answer' field is the 0-based index of the correct option.\n\n"
+        "Document content:\n"
+        f"{document_text}"
+    )
+
+    try:
+        raw = _call_gemini(system_instruction, prompt, temperature=0.3)
+        cleaned = raw.strip().lstrip("```json").lstrip("```").rstrip("```").strip()
+        questions = json.loads(cleaned)
+
+        if not isinstance(questions, list):
+            raise ValueError(f"Expected JSON array, got {type(questions)}")
+
+        validated = []
+        for i, q in enumerate(questions):
+            if not isinstance(q, dict):
+                logger.warning(f"Skipping non-dict question at index {i}")
+                continue
+            if not all(k in q for k in ("q", "options", "answer")):
+                logger.warning(
+                    f"Skipping question missing required fields at index {i}: {q}"
+                )
+                continue
+            if not isinstance(q["options"], list) or len(q["options"]) != 4:
+                logger.warning(
+                    f"Skipping question {i} with wrong option count: {len(q.get('options', []))}"
+                )
+                continue
+            if not isinstance(q["answer"], int) or not (0 <= q["answer"] <= 3):
+                logger.warning(
+                    f"Skipping question {i} with invalid answer index: {q['answer']}"
+                )
+                continue
+            validated.append(
+                {
+                    "q": str(q["q"]).strip(),
+                    "options": [str(o).strip() for o in q["options"]],
+                    "answer": int(q["answer"]),
+                    "explanation": str(q.get("explanation", "")).strip(),
+                }
+            )
+
+        if not validated:
+            raise ValueError("No valid questions parsed from Gemini response")
+
+        if len(validated) != question_count:
+            logger.warning(
+                f"Expected {question_count} questions, got {len(validated)} for file '{filename}'"
+            )
+
+        logger.info(f"Generated {len(validated)} quiz questions for '{filename}'")
+        return validated
+
+    except json.JSONDecodeError as e:
+        logger.error(
+            f"Failed to parse quiz JSON for '{filename}': {e}\nRaw response: {raw[:500]}"
+        )
+        raise ValueError(f"Gemini returned invalid JSON: {e}")
+
+
+def generate_summary(
+    chunks: list[str],
+    filename: str = "document",
+    style: str = "bullets",
+) -> str:
+    """
+    Generate a summary from reconstructed document chunks.
+
+    Args:
+        chunks:   Ordered list of text chunks from ChromaDB
+        filename: Original filename for context
+        style:    'bullets' | 'key_terms'
+
+    Returns:
+        Summary as a plain text string (markdown-flavoured for the frontend to render)
+    Raises:
+        ValueError: on empty input or Gemini failure
+    """
+    if not chunks:
+        raise ValueError("No chunks provided for summary generation")
+
+    document_text = "\n\n".join(chunks)
+
+    max_chars = 80_000
+    if len(document_text) > max_chars:
+        logger.warning(
+            f"Document truncated from {len(document_text)} to {max_chars} chars for summary"
+        )
+        document_text = document_text[:max_chars]
+
+    if style == "key_terms":
+        system_instruction = (
+            "You are a study assistant that extracts key terms and definitions from documents. "
+            "For each important term, concept, or idea, provide a clear, concise definition. "
+            "Ignore metadata, file info, dates, and administrative content. "
+            "Do not use emojis. Format your response as a clean list."
+        )
+        prompt = (
+            f'Extract the key terms and definitions from this document: "{filename}"\n\n'
+            "Return a list of terms in this exact format — one per line, no extra spacing:\n"
+            "**Term**: Definition in one or two clear sentences.\n\n"
+            "Focus on concepts that a student would need to understand and remember.\n\n"
+            f"Document:\n{document_text}"
+        )
+    else:  # bullets
+        system_instruction = (
+            "You are a study assistant that creates concise, accurate bullet-point summaries. "
+            "Each bullet should capture one key idea, finding, or concept from the document. "
+            "Group related bullets under short bold headings where appropriate. "
+            "Ignore metadata, file info, dates, and administrative content. "
+            "Do not use emojis."
+        )
+        prompt = (
+            f'Summarize the key content of this document in bullet points: "{filename}"\n\n'
+            "Use this format:\n"
+            "**Section or Theme**\n"
+            "- Key point\n"
+            "- Key point\n\n"
+            "Be thorough but concise. Cover all major ideas a student should know.\n\n"
+            f"Document:\n{document_text}"
+        )
+
+    try:
+        result = _call_gemini(system_instruction, prompt, temperature=0.2)
+        if not result or not result.strip():
+            raise ValueError("Gemini returned an empty summary")
+        logger.info(f"Generated {style} summary for '{filename}'")
+        return result.strip()
+    except ValueError:
+        raise
+    except Exception as e:
+        logger.error(f"generate_summary failed for '{filename}': {e}", exc_info=True)
+        raise
