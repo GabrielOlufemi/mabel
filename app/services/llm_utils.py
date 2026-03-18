@@ -65,6 +65,7 @@ def rewrite_query(query: str) -> str:
         return query
 
 
+# query classification function
 def classify_query(query: str) -> str:
     """
     Classify the user query into one of:
@@ -107,7 +108,7 @@ def generate_conversational_response(query: str, history: List[Dict] = None) -> 
     try:
         prompt = (
             f"You are {settings.SERVICE_NAME}, a friendly and helpful AI study assistant. "
-            "You help students understand their documents, generate flashcards, quizzes, and summaries. "
+            "You help learners understand their documents, generate flashcards, quizzes, and summaries. "
             "Respond naturally and warmly to the user's message. "
             "If they ask what you can do, briefly explain your study features. "
             "Keep responses concise and friendly. Do not use emojis."
@@ -123,7 +124,7 @@ def generate_conversational_response(query: str, history: List[Dict] = None) -> 
         logger.error(
             f"generate_conversational_response failed. Error: {e}", exc_info=True
         )
-        return "Hey! I'm MABEL, your study assistant. Upload a document and ask me anything about it!"
+        return f"Hey! I'm {settings.SERVICE_NAME}, your study assistant. Upload a document and ask me anything about it!"
 
 
 def generate_general_response(query: str, history: List[Dict] = None) -> str:
@@ -227,7 +228,7 @@ def generate_flashcards(
         document_text = document_text[:max_chars]
 
     system_instruction = (
-        "You are a study assistant that generates high-quality flashcards to help students learn. "
+        "You are a study assistant that generates high-quality flashcards to help learners learn. "
         "Your flashcards must test understanding of CONCEPTS, FACTS, DEFINITIONS, and IDEAS found in the document. "
         "STRICTLY IGNORE any of the following — they are document metadata, not study content: "
         "file names, file sizes, submission IDs, dates, deadlines, form fields, author names, "
@@ -309,7 +310,7 @@ def generate_quiz(
         document_text = document_text[:max_chars]
 
     system_instruction = (
-        "You are a study assistant that generates high-quality multiple-choice quiz questions. "
+        f"You are {settings.SERVICE_NAME}, a study assistant that generates high-quality multiple-choice quiz questions. "
         "Questions must test genuine understanding of CONCEPTS, FACTS, DEFINITIONS, and IDEAS. "
         "STRICTLY IGNORE document metadata: file names, submission IDs, dates, form fields, "
         "author names, page numbers, headers, footers, and administrative details. "
@@ -427,7 +428,7 @@ def generate_summary(
             f'Extract the key terms and definitions from this document: "{filename}"\n\n'
             "Return a list of terms in this exact format — one per line, no extra spacing:\n"
             "**Term**: Definition in one or two clear sentences.\n\n"
-            "Focus on concepts that a student would need to understand and remember.\n\n"
+            "Focus on concepts that a learner would need to understand and remember.\n\n"
             f"Document:\n{document_text}"
         )
     else:  # bullets
@@ -444,7 +445,7 @@ def generate_summary(
             "**Section or Theme**\n"
             "- Key point\n"
             "- Key point\n\n"
-            "Be thorough but concise. Cover all major ideas a student should know.\n\n"
+            "Be thorough but concise. Cover all major ideas a learner should know.\n\n"
             f"Document:\n{document_text}"
         )
 

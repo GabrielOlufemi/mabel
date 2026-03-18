@@ -16,14 +16,14 @@ logger = logging.getLogger(__name__)
 study_router = APIRouter()
 
 
-# ── Shared schemas ─────────────────────────────────────────────────────────────
+# Shared schemas
 
 class FlashcardCard(BaseModel):
     q: str
     a: str
 
 
-# ── Flashcard schemas ──────────────────────────────────────────────────────────
+# Flashcard schemas
 
 class GenerateRequest(BaseModel):
     file_id: str
@@ -61,17 +61,18 @@ class DeckDetailResponse(BaseModel):
     created_at: int
 
 
-# ── Quiz schemas ───────────────────────────────────────────────────────────────
+# Quiz schemas
 
 class QuizOption(BaseModel):
     """One multiple-choice option."""
+
     text: str
 
 
 class QuizQuestion(BaseModel):
     q: str
-    options: List[str]   # exactly 4 option strings
-    answer: int          # 0-based index of the correct option
+    options: List[str]  # exactly 4 option strings
+    answer: int  # 0-based index of the correct option
     explanation: Optional[str] = None
 
 
@@ -88,7 +89,7 @@ class QuizGenerateResponse(BaseModel):
     question_count: int
 
 
-# ── Shared helper ──────────────────────────────────────────────────────────────
+# Shared helper
 
 def _reconstruct_chunks_from_store(user_id: str, file_id: str) -> tuple[list[str], str]:
     """
@@ -105,7 +106,9 @@ def _reconstruct_chunks_from_store(user_id: str, file_id: str) -> tuple[list[str
     )
 
     if not results["ids"]:
-        raise HTTPException(404, f"No document found with file_id '{file_id}' for this user")
+        raise HTTPException(
+            404, f"No document found with file_id '{file_id}' for this user"
+        )
 
     paired = []
     filename = "document"
@@ -118,11 +121,14 @@ def _reconstruct_chunks_from_store(user_id: str, file_id: str) -> tuple[list[str
     paired.sort(key=lambda x: x[0])
     ordered_chunks = [text for _, text in paired]
 
-    logger.info(f"Reconstructed {len(ordered_chunks)} chunks for file_id '{file_id}' ('{filename}')")
+    logger.info(
+        f"Reconstructed {len(ordered_chunks)} chunks for file_id '{file_id}' ('{filename}')"
+    )
     return ordered_chunks, filename
 
 
-# ── Flashcard routes ───────────────────────────────────────────────────────────
+# Flashcard routes
+
 
 @study_router.post("/flashcards/generate", response_model=GenerateResponse)
 async def generate_deck(
@@ -139,7 +145,9 @@ async def generate_deck(
         chunks, filename = _reconstruct_chunks_from_store(user_id, request.file_id)
         display_name = request.filename if request.filename != "document" else filename
 
-        cards = generate_flashcards(chunks, filename=display_name, card_count=request.card_count)
+        cards = generate_flashcards(
+            chunks, filename=display_name, card_count=request.card_count
+        )
         title = display_name
 
         deck_id = None
@@ -265,7 +273,8 @@ async def delete_deck(
         raise HTTPException(500, f"Error deleting deck: {str(e)}")
 
 
-# ── Quiz routes ────────────────────────────────────────────────────────────────
+# Quiz routes
+
 
 @study_router.post("/quiz/generate", response_model=QuizGenerateResponse)
 async def generate_quiz_endpoint(
@@ -304,25 +313,26 @@ async def generate_quiz_endpoint(
         raise HTTPException(500, f"Error generating quiz: {str(e)}")
 
 
-# ── Summarize schemas ──────────────────────────────────────────────────────────
+# Summarize schemas
+
 
 class SummaryStyle(str):
-    bullets   = 'bullets'
-    key_terms = 'key_terms'
+    bullets = "bullets"
+    key_terms = "key_terms"
 
 
 class SummarizeRequest(BaseModel):
-    file_id:  str
+    file_id: str
     filename: Optional[str] = "document"
-    style:    str = Field(default='bullets', pattern='^(bullets|key_terms)$')
+    style: str = Field(default="bullets", pattern="^(bullets|key_terms)$")
 
 
 class SummarizeResponse(BaseModel):
     summary_id: str
-    file_id:    str
-    title:      str
-    style:      str
-    content:    str
+    file_id: str
+    title: str
+    style: str
+    content: str
     created_at: int
 
 
@@ -330,7 +340,8 @@ class SummaryListResponse(BaseModel):
     summaries: List[SummarizeResponse]
 
 
-# ── Summarize routes ───────────────────────────────────────────────────────────
+# Summarize routes
+
 
 @study_router.post("/summarize", response_model=SummarizeResponse)
 async def create_summary(

@@ -143,7 +143,7 @@ async def chat(request: ChatRequest, user_id: str = Depends(verify_token)):
             file_ids=request.active_document_ids or [],
         )
 
-        # No results → general knowledge fallback
+        # No results -> general knowledge fallback
         if not search_results:
             logger.info("No documents found, falling back to general knowledge")
             response_text = generate_general_response(request.query, history=history)
@@ -196,7 +196,7 @@ async def chat(request: ChatRequest, user_id: str = Depends(verify_token)):
                 sources=[],
             )
 
-        # 5. Rerank → RAG
+        # 5. Rerank -> RAG
         reranker = get_reranker()
         reranked_results = reranker.rerank(
             query=rewritten_query,
@@ -221,7 +221,7 @@ async def chat(request: ChatRequest, user_id: str = Depends(verify_token)):
             user_message=request.query,
             assistant_message=response_text,
             turn_index=turn_index,
-            sources=sources,  # ← persisted
+            sources=sources,  # <- persisted
         )
 
         logger.info(

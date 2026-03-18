@@ -88,5 +88,4 @@ app.include_router(chat_router, prefix="/api/chat", tags=["chat"])
 app.include_router(
     conversations_router, prefix="/api/conversations", tags=["conversations"]
 )
-
 app.include_router(study_router, prefix="/api/study", tags="study")
