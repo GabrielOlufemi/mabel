@@ -7,7 +7,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-# Client initialization, should fail loudly if key is missing
+# Client initialization, should fail loudly if key is missing 
 if not settings.GEMINI_API_KEY:
     raise RuntimeError("GEMINI_API_KEY is not set. Check your .env file.")
 
@@ -65,7 +65,6 @@ def rewrite_query(query: str) -> str:
         return query
 
 
-# query classification function
 def classify_query(query: str) -> str:
     """
     Classify the user query into one of:
@@ -108,7 +107,7 @@ def generate_conversational_response(query: str, history: List[Dict] = None) -> 
     try:
         prompt = (
             f"You are {settings.SERVICE_NAME}, a friendly and helpful AI study assistant. "
-            "You help learners understand their documents, generate flashcards, quizzes, and summaries. "
+            "You help students understand their documents, generate flashcards, quizzes, and summaries. "
             "Respond naturally and warmly to the user's message. "
             "If they ask what you can do, briefly explain your study features. "
             "Keep responses concise and friendly. Do not use emojis."
@@ -124,7 +123,7 @@ def generate_conversational_response(query: str, history: List[Dict] = None) -> 
         logger.error(
             f"generate_conversational_response failed. Error: {e}", exc_info=True
         )
-        return f"Hey! I'm {settings.SERVICE_NAME}, your study assistant. Upload a document and ask me anything about it!"
+        return "Hey! I'm MABEL, your study assistant. Upload a document and ask me anything about it!"
 
 
 def generate_general_response(query: str, history: List[Dict] = None) -> str:
@@ -202,9 +201,7 @@ def _format_history(history: List[Dict]) -> str:
     return "\n".join(lines)
 
 
-def generate_flashcards(
-    chunks: list[str], filename: str = "document", card_count: int = 8
-) -> list[dict]:
+def generate_flashcards(chunks: list[str], filename: str = "document", card_count: int = 8) -> list[dict]:
     """
     Generate flashcards from reconstructed document chunks.
 
@@ -228,7 +225,7 @@ def generate_flashcards(
         document_text = document_text[:max_chars]
 
     system_instruction = (
-        "You are a study assistant that generates high-quality flashcards to help learners learn. "
+        "You are a study assistant that generates high-quality flashcards to help students learn. "
         "Your flashcards must test understanding of CONCEPTS, FACTS, DEFINITIONS, and IDEAS found in the document. "
         "STRICTLY IGNORE any of the following — they are document metadata, not study content: "
         "file names, file sizes, submission IDs, dates, deadlines, form fields, author names, "
@@ -275,9 +272,7 @@ def generate_flashcards(
         return validated
 
     except json.JSONDecodeError as e:
-        logger.error(
-            f"Failed to parse flashcard JSON for '{filename}': {e}\nRaw response: {raw[:500]}"
-        )
+        logger.error(f"Failed to parse flashcard JSON for '{filename}': {e}\nRaw response: {raw[:500]}")
         raise ValueError(f"Gemini returned invalid JSON: {e}")
 
 
@@ -310,7 +305,7 @@ def generate_quiz(
         document_text = document_text[:max_chars]
 
     system_instruction = (
-        f"You are {settings.SERVICE_NAME}, a study assistant that generates high-quality multiple-choice quiz questions. "
+        "You are a study assistant that generates high-quality multiple-choice quiz questions. "
         "Questions must test genuine understanding of CONCEPTS, FACTS, DEFINITIONS, and IDEAS. "
         "STRICTLY IGNORE document metadata: file names, submission IDs, dates, form fields, "
         "author names, page numbers, headers, footers, and administrative details. "
@@ -320,7 +315,7 @@ def generate_quiz(
     )
 
     prompt = (
-        f"Generate exactly {question_count} multiple-choice questions from the STUDY CONTENT "
+        f'Generate exactly {question_count} multiple-choice questions from the STUDY CONTENT '
         f'of the following document: "{filename}"\n\n'
         "Each question must have exactly 4 options and one correct answer.\n"
         "Include a brief explanation (1-2 sentences) for why the correct answer is right.\n\n"
@@ -346,28 +341,20 @@ def generate_quiz(
                 logger.warning(f"Skipping non-dict question at index {i}")
                 continue
             if not all(k in q for k in ("q", "options", "answer")):
-                logger.warning(
-                    f"Skipping question missing required fields at index {i}: {q}"
-                )
+                logger.warning(f"Skipping question missing required fields at index {i}: {q}")
                 continue
             if not isinstance(q["options"], list) or len(q["options"]) != 4:
-                logger.warning(
-                    f"Skipping question {i} with wrong option count: {len(q.get('options', []))}"
-                )
+                logger.warning(f"Skipping question {i} with wrong option count: {len(q.get('options', []))}")
                 continue
             if not isinstance(q["answer"], int) or not (0 <= q["answer"] <= 3):
-                logger.warning(
-                    f"Skipping question {i} with invalid answer index: {q['answer']}"
-                )
+                logger.warning(f"Skipping question {i} with invalid answer index: {q['answer']}")
                 continue
-            validated.append(
-                {
-                    "q": str(q["q"]).strip(),
-                    "options": [str(o).strip() for o in q["options"]],
-                    "answer": int(q["answer"]),
-                    "explanation": str(q.get("explanation", "")).strip(),
-                }
-            )
+            validated.append({
+                "q":           str(q["q"]).strip(),
+                "options":     [str(o).strip() for o in q["options"]],
+                "answer":      int(q["answer"]),
+                "explanation": str(q.get("explanation", "")).strip(),
+            })
 
         if not validated:
             raise ValueError("No valid questions parsed from Gemini response")
@@ -381,9 +368,7 @@ def generate_quiz(
         return validated
 
     except json.JSONDecodeError as e:
-        logger.error(
-            f"Failed to parse quiz JSON for '{filename}': {e}\nRaw response: {raw[:500]}"
-        )
+        logger.error(f"Failed to parse quiz JSON for '{filename}': {e}\nRaw response: {raw[:500]}")
         raise ValueError(f"Gemini returned invalid JSON: {e}")
 
 
@@ -419,38 +404,42 @@ def generate_summary(
 
     if style == "key_terms":
         system_instruction = (
-            "You are a study assistant that extracts key terms and definitions from documents. "
-            "For each important term, concept, or idea, provide a clear, concise definition. "
-            "Ignore metadata, file info, dates, and administrative content. "
-            "Do not use emojis. Format your response as a clean list."
+            "You are Mabel, a knowledgeable study assistant. "
+            "Extract key terms and concepts and explain them clearly and conversationally — "
+            "like a smart friend who knows the subject well. "
+            "Never start with greetings, intros, or filler like 'Here are the key terms', 'Sure!', or 'Hey there'. "
+            "Jump straight into the first term. Each definition should feel like a natural explanation, "
+            "not a dictionary entry. Ignore metadata, file headers, dates, and admin content. No emojis."
         )
         prompt = (
-            f'Extract the key terms and definitions from this document: "{filename}"\n\n'
-            "Return a list of terms in this exact format — one per line, no extra spacing:\n"
-            "**Term**: Definition in one or two clear sentences.\n\n"
-            "Focus on concepts that a learner would need to understand and remember.\n\n"
+            f"Pull out the key terms and concepts a student needs to know from this document: \"{filename}\"\n\n"
+            "Start immediately with the first term — no preamble. Use this exact format:\n"
+            "**Term**: Explanation in one or two conversational sentences.\n\n"
+            "Only include terms that genuinely matter for understanding the subject.\n\n"
             f"Document:\n{document_text}"
         )
     else:  # bullets
         system_instruction = (
-            "You are a study assistant that creates concise, accurate bullet-point summaries. "
-            "Each bullet should capture one key idea, finding, or concept from the document. "
-            "Group related bullets under short bold headings where appropriate. "
-            "Ignore metadata, file info, dates, and administrative content. "
-            "Do not use emojis."
+            "You are Mabel, a knowledgeable study assistant. "
+            "Summarize documents in a clear, direct, conversational tone — "
+            "like a smart friend explaining the material, not a report generator. "
+            "Never start with greetings, intros, or filler phrases like 'Hey there', 'Sure!', "
+            "'Great question', or 'Here is a summary of'. Jump straight into the first heading. "
+            "Use bullet points grouped under short bold headings. Write each bullet as a "
+            "clear explanation, not a dry fact. Skip metadata, file info, and admin content. No emojis."
         )
         prompt = (
-            f'Summarize the key content of this document in bullet points: "{filename}"\n\n'
-            "Use this format:\n"
-            "**Section or Theme**\n"
-            "- Key point\n"
-            "- Key point\n\n"
-            "Be thorough but concise. Cover all major ideas a learner should know.\n\n"
+            f"Summarize the key ideas from this document: \"{filename}\"\n\n"
+            "Start immediately with the first heading — no preamble. Use this exact format:\n"
+            "**Theme or Section**\n"
+            "- Key idea explained conversationally\n"
+            "- Another point, written like you are talking to a student\n\n"
+            "Be thorough but concise. Every bullet should earn its place.\n\n"
             f"Document:\n{document_text}"
         )
 
     try:
-        result = _call_gemini(system_instruction, prompt, temperature=0.2)
+        result = _call_gemini(system_instruction, prompt, temperature=0.4)
         if not result or not result.strip():
             raise ValueError("Gemini returned an empty summary")
         logger.info(f"Generated {style} summary for '{filename}'")

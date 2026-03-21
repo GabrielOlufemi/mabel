@@ -17,14 +17,12 @@ study_router = APIRouter()
 
 
 # Shared schemas
-
 class FlashcardCard(BaseModel):
     q: str
     a: str
 
 
 # Flashcard schemas
-
 class GenerateRequest(BaseModel):
     file_id: str
     filename: Optional[str] = "document"
@@ -62,11 +60,35 @@ class DeckDetailResponse(BaseModel):
 
 
 # Quiz schemas
-
 class QuizOption(BaseModel):
     """One multiple-choice option."""
 
     text: str
+
+
+# Summarize schemas
+class SummaryStyle(str):
+    bullets = "bullets"
+    key_terms = "key_terms"
+
+
+class SummarizeRequest(BaseModel):
+    file_id: str
+    filename: Optional[str] = "document"
+    style: str = Field(default="bullets", pattern="^(bullets|key_terms)$")
+
+
+class SummarizeResponse(BaseModel):
+    summary_id: str
+    file_id: str
+    title: str
+    style: str
+    content: str
+    created_at: int
+
+
+class SummaryListResponse(BaseModel):
+    summaries: List[SummarizeResponse]
 
 
 class QuizQuestion(BaseModel):
@@ -90,7 +112,6 @@ class QuizGenerateResponse(BaseModel):
 
 
 # Shared helper
-
 def _reconstruct_chunks_from_store(user_id: str, file_id: str) -> tuple[list[str], str]:
     """
     Pull all stored chunks for a file_id back out of ChromaDB,
@@ -128,8 +149,6 @@ def _reconstruct_chunks_from_store(user_id: str, file_id: str) -> tuple[list[str
 
 
 # Flashcard routes
-
-
 @study_router.post("/flashcards/generate", response_model=GenerateResponse)
 async def generate_deck(
     request: GenerateRequest,
@@ -274,8 +293,6 @@ async def delete_deck(
 
 
 # Quiz routes
-
-
 @study_router.post("/quiz/generate", response_model=QuizGenerateResponse)
 async def generate_quiz_endpoint(
     request: QuizGenerateRequest,
@@ -313,36 +330,7 @@ async def generate_quiz_endpoint(
         raise HTTPException(500, f"Error generating quiz: {str(e)}")
 
 
-# Summarize schemas
-
-
-class SummaryStyle(str):
-    bullets = "bullets"
-    key_terms = "key_terms"
-
-
-class SummarizeRequest(BaseModel):
-    file_id: str
-    filename: Optional[str] = "document"
-    style: str = Field(default="bullets", pattern="^(bullets|key_terms)$")
-
-
-class SummarizeResponse(BaseModel):
-    summary_id: str
-    file_id: str
-    title: str
-    style: str
-    content: str
-    created_at: int
-
-
-class SummaryListResponse(BaseModel):
-    summaries: List[SummarizeResponse]
-
-
 # Summarize routes
-
-
 @study_router.post("/summarize", response_model=SummarizeResponse)
 async def create_summary(
     request: SummarizeRequest,
