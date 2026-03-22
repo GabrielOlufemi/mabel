@@ -35,3 +35,11 @@ Thumbs.db
 
 # Model cache
 .cache/
+
+# Eval
+app/eval/reports/
+app/eval/test_data/queries.json
+
+# Test scripts
+test_db.py
+get_ids.py

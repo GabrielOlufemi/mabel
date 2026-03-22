@@ -1,45 +1,120 @@
 # app/services/llm_utils.py
-from google import genai
-from google.genai import errors as genai_errors
 from app.config import settings
 from typing import List, Dict
 import logging
 
 logger = logging.getLogger(__name__)
 
-# Client initialization, should fail loudly if key is missing 
-if not settings.GEMINI_API_KEY:
-    raise RuntimeError("GEMINI_API_KEY is not set. Check your .env file.")
+# ── Provider selection ────────────────────────────────────────────────────────
+# Set LLM_PROVIDER=openrouter in .env to use OpenRouter instead of Gemini.
+# Everything downstream calls _call_gemini() unchanged — the swap is invisible.
 
-client = genai.Client(api_key=settings.GEMINI_API_KEY)
-logger.info(f"Gemini client initialized. Model: {settings.GEMINI_MODEL_NAME}")
+_PROVIDER = getattr(settings, "LLM_PROVIDER", "gemini").lower()
+
+if _PROVIDER == "openrouter":
+    import openai as _openai
+
+    _or_client = _openai.OpenAI(
+        base_url="https://openrouter.ai/api/v1",
+        api_key=settings.OPENROUTER_API_KEY,
+    )
+    # Override with OPENROUTER_MODEL in .env — free options:
+    #   google/gemini-2.0-flash-exp:free
+    #   mistralai/mistral-7b-instruct:free
+    #   meta-llama/llama-3.1-8b-instruct:free
+    _OR_MODEL = getattr(
+        settings, "OPENROUTER_MODEL", "google/gemini-2.0-flash-exp:free"
+    )
+    logger.info(f"LLM provider: OpenRouter. Model: {_OR_MODEL}")
+
+else:
+    from google import genai
+    from google.genai import errors as genai_errors
+
+    if not settings.GEMINI_API_KEY:
+        raise RuntimeError("GEMINI_API_KEY is not set. Check your .env file.")
+    client = genai.Client(api_key=settings.GEMINI_API_KEY)
+    logger.info(f"LLM provider: Gemini. Model: {settings.GEMINI_MODEL_NAME}")
 
 
 def _call_gemini(
     system_instruction: str, contents: str, temperature: float = 0.4
 ) -> str:
     """
-    Central Gemini call — raises on failure so callers can handle it explicitly.
-    All API calls go through here so error logging is consistent.
+    Central LLM call — routes to OpenRouter or Gemini based on LLM_PROVIDER.
+    All callers use this so the provider swap is completely transparent.
     """
-    response = client.models.generate_content(
-        model=settings.GEMINI_MODEL_NAME,
-        contents=contents,
-        config=genai.types.GenerateContentConfig(
-            system_instruction=system_instruction,
-            temperature=temperature,
-        ),
+    if _PROVIDER == "openrouter":
+        return _call_openrouter(system_instruction, contents, temperature)
+    return _call_gemini_direct(system_instruction, contents, temperature)
+
+
+def _call_openrouter(
+    system_instruction: str, contents: str, temperature: float = 0.4
+) -> str:
+    """Call OpenRouter using the OpenAI-compatible API."""
+    response = _or_client.chat.completions.create(
+        model=_OR_MODEL,
+        temperature=temperature,
+        messages=[
+            {"role": "system", "content": system_instruction},
+            {"role": "user", "content": contents},
+        ],
     )
+    text = response.choices[0].message.content or ""
+    logger.debug(
+        f"OpenRouter usage — in: {response.usage.prompt_tokens}, "
+        f"out: {response.usage.completion_tokens}"
+    )
+    return text.strip()
 
-    if hasattr(response, "usage_metadata") and response.usage_metadata:
-        usage = response.usage_metadata
-        logger.debug(
-            f"Token usage — in: {usage.prompt_token_count}, "
-            f"out: {usage.candidates_token_count}, "
-            f"total: {usage.total_token_count}"
+
+def _call_gemini_direct(
+    system_instruction: str, contents: str, temperature: float = 0.4
+) -> str:
+    """Direct Gemini call — used only when LLM_PROVIDER=gemini (default)."""
+    import time
+    from google import genai
+
+    def _attempt():
+        response = client.models.generate_content(
+            model=settings.GEMINI_MODEL_NAME,
+            contents=contents,
+            config=genai.types.GenerateContentConfig(
+                system_instruction=system_instruction,
+                temperature=temperature,
+            ),
         )
+        if hasattr(response, "usage_metadata") and response.usage_metadata:
+            usage = response.usage_metadata
+            logger.debug(
+                f"Token usage — in: {usage.prompt_token_count}, "
+                f"out: {usage.candidates_token_count}, "
+                f"total: {usage.total_token_count}"
+            )
+        return response.text.strip()
 
-    return response.text.strip()
+    try:
+        return _attempt()
+    except Exception as e:
+        err = str(e).lower()
+        is_transient = any(
+            x in err
+            for x in (
+                "server disconnected",
+                "remoteprotocolerror",
+                "getaddrinfo failed",
+                "connect error",
+                "connection reset",
+            )
+        )
+        if is_transient:
+            logger.warning(f"Transient connection error, retrying in 1s: {e}")
+            time.sleep(1)
+            global client
+            client = genai.Client(api_key=settings.GEMINI_API_KEY)
+            return _attempt()
+        raise
 
 
 def rewrite_query(query: str) -> str:
@@ -201,7 +276,9 @@ def _format_history(history: List[Dict]) -> str:
     return "\n".join(lines)
 
 
-def generate_flashcards(chunks: list[str], filename: str = "document", card_count: int = 8) -> list[dict]:
+def generate_flashcards(
+    chunks: list[str], filename: str = "document", card_count: int = 8
+) -> list[dict]:
     """
     Generate flashcards from reconstructed document chunks.
 
@@ -272,7 +349,9 @@ def generate_flashcards(chunks: list[str], filename: str = "document", card_coun
         return validated
 
     except json.JSONDecodeError as e:
-        logger.error(f"Failed to parse flashcard JSON for '{filename}': {e}\nRaw response: {raw[:500]}")
+        logger.error(
+            f"Failed to parse flashcard JSON for '{filename}': {e}\nRaw response: {raw[:500]}"
+        )
         raise ValueError(f"Gemini returned invalid JSON: {e}")
 
 
@@ -315,7 +394,7 @@ def generate_quiz(
     )
 
     prompt = (
-        f'Generate exactly {question_count} multiple-choice questions from the STUDY CONTENT '
+        f"Generate exactly {question_count} multiple-choice questions from the STUDY CONTENT "
         f'of the following document: "{filename}"\n\n'
         "Each question must have exactly 4 options and one correct answer.\n"
         "Include a brief explanation (1-2 sentences) for why the correct answer is right.\n\n"
@@ -341,20 +420,28 @@ def generate_quiz(
                 logger.warning(f"Skipping non-dict question at index {i}")
                 continue
             if not all(k in q for k in ("q", "options", "answer")):
-                logger.warning(f"Skipping question missing required fields at index {i}: {q}")
+                logger.warning(
+                    f"Skipping question missing required fields at index {i}: {q}"
+                )
                 continue
             if not isinstance(q["options"], list) or len(q["options"]) != 4:
-                logger.warning(f"Skipping question {i} with wrong option count: {len(q.get('options', []))}")
+                logger.warning(
+                    f"Skipping question {i} with wrong option count: {len(q.get('options', []))}"
+                )
                 continue
             if not isinstance(q["answer"], int) or not (0 <= q["answer"] <= 3):
-                logger.warning(f"Skipping question {i} with invalid answer index: {q['answer']}")
+                logger.warning(
+                    f"Skipping question {i} with invalid answer index: {q['answer']}"
+                )
                 continue
-            validated.append({
-                "q":           str(q["q"]).strip(),
-                "options":     [str(o).strip() for o in q["options"]],
-                "answer":      int(q["answer"]),
-                "explanation": str(q.get("explanation", "")).strip(),
-            })
+            validated.append(
+                {
+                    "q": str(q["q"]).strip(),
+                    "options": [str(o).strip() for o in q["options"]],
+                    "answer": int(q["answer"]),
+                    "explanation": str(q.get("explanation", "")).strip(),
+                }
+            )
 
         if not validated:
             raise ValueError("No valid questions parsed from Gemini response")
@@ -368,7 +455,9 @@ def generate_quiz(
         return validated
 
     except json.JSONDecodeError as e:
-        logger.error(f"Failed to parse quiz JSON for '{filename}': {e}\nRaw response: {raw[:500]}")
+        logger.error(
+            f"Failed to parse quiz JSON for '{filename}': {e}\nRaw response: {raw[:500]}"
+        )
         raise ValueError(f"Gemini returned invalid JSON: {e}")
 
 
@@ -412,7 +501,7 @@ def generate_summary(
             "not a dictionary entry. Ignore metadata, file headers, dates, and admin content. No emojis."
         )
         prompt = (
-            f"Pull out the key terms and concepts a student needs to know from this document: \"{filename}\"\n\n"
+            f'Pull out the key terms and concepts a student needs to know from this document: "{filename}"\n\n'
             "Start immediately with the first term — no preamble. Use this exact format:\n"
             "**Term**: Explanation in one or two conversational sentences.\n\n"
             "Only include terms that genuinely matter for understanding the subject.\n\n"
@@ -429,7 +518,7 @@ def generate_summary(
             "clear explanation, not a dry fact. Skip metadata, file info, and admin content. No emojis."
         )
         prompt = (
-            f"Summarize the key ideas from this document: \"{filename}\"\n\n"
+            f'Summarize the key ideas from this document: "{filename}"\n\n'
             "Start immediately with the first heading — no preamble. Use this exact format:\n"
             "**Theme or Section**\n"
             "- Key idea explained conversationally\n"

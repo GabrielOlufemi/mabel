@@ -39,5 +39,10 @@ class Settings:
     # chat routing stuff
     SIMILARITY_THRESHOLD: float = float(os.getenv("SIMILARITY_THRESHOLD", "0.3"))
 
+    # openrouter shit
+    LLM_PROVIDER: str = os.getenv("LLM_PROVIDER", "gemini")
+    OPENROUTER_API_KEY: str = os.getenv("OPENROUTER_API_KEY", "")
+    OPENROUTER_MODEL: str = os.getenv("OPENROUTER_MODEL", "google/gemini-2.5-flash")
+
 
 settings = Settings()
