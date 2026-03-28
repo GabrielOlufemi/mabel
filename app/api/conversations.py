@@ -35,6 +35,7 @@ class ConversationTurn(BaseModel):
 class ConversationDetailResponse(BaseModel):
     conversation_id: str
     turns: List[ConversationTurn]
+    active_document_ids: Optional[List[str]] = None
 
 
 @conversations_router.get("/", response_model=ConversationsListResponse)
@@ -120,14 +121,22 @@ async def get_conversation(conversation_id: str, user_id: str = Depends(verify_t
         if not turns:
             raise HTTPException(404, "Conversation not found")
 
+        # Collect the union of all document IDs that were active across turns
+        # so the frontend can restore the document selection for this conversation.
+        all_doc_ids = set()
+        for t in turns:
+            for doc_id in t.get("active_document_ids") or []:
+                all_doc_ids.add(doc_id)
+
         return ConversationDetailResponse(
             conversation_id=conversation_id,
+            active_document_ids=sorted(all_doc_ids) if all_doc_ids else None,
             turns=[
                 ConversationTurn(
                     user=t["user"],
                     assistant=t["assistant"],
                     turn_index=t["turn_index"],
-                    sources=t.get("sources") or None,  # ← restored from stored metadata
+                    sources=t.get("sources") or None,
                 )
                 for t in turns
             ],

@@ -142,39 +142,47 @@ def rewrite_query(query: str) -> str:
 
 def classify_query(query: str) -> str:
     """
-    Classify the user query into one of:
-    - 'conversational': greetings, thanks, casual chat
-    - 'document_question': questions about uploaded study material
-    - 'general_knowledge': factual questions not tied to documents
+    Classify the user query as either:
+    - 'conversational': greetings, thanks, casual chat, questions about capabilities
+    - 'search': anything that needs information lookup — whether from documents or general knowledge
+
+    Note: the old three-way split (conversational / document_question / general_knowledge)
+    was removed because document_question and general_knowledge followed the exact same
+    code path in the router.  Keeping them separate only increased the chance that the LLM
+    would misclassify a document question as general_knowledge (or vice-versa) for no
+    routing benefit.  The vector-search + similarity-threshold logic already decides
+    whether to use retrieved context or fall back to general knowledge.
     """
     if not query or not query.strip():
         return "conversational"
 
     try:
         prompt = (
-            "Classify the following user message into exactly one of these three categories:\n\n"
-            "1. conversational — greetings, thanks, casual chat, questions about what you can do\n"
-            "2. document_question — questions likely about uploaded study material or documents\n"
-            "3. general_knowledge — factual or conceptual questions not tied to any specific document\n\n"
-            "Return ONLY one of these exact strings: conversational, document_question, general_knowledge"
+            "Classify the following user message into exactly one of these two categories:\n\n"
+            "1. conversational — greetings, thanks, casual small-talk, or questions about what you can do "
+            "(e.g. 'hi', 'thanks', 'what can you help me with?')\n"
+            "2. search — any message that asks a question, requests information, or needs a factual answer, "
+            "regardless of whether it is about a specific document or general knowledge "
+            "(e.g. 'what is photosynthesis?', 'explain chapter 3', 'who is the president?')\n\n"
+            "Return ONLY one of these exact strings: conversational, search"
         )
-        result = _call_gemini(prompt, query, temperature=0.0).lower()
+        result = _call_gemini(prompt, query, temperature=0.0).lower().strip()
 
-        if result not in ("conversational", "document_question", "general_knowledge"):
+        if result not in ("conversational", "search"):
             logger.warning(
-                f"Unexpected classification '{result}', defaulting to document_question"
+                f"Unexpected classification '{result}', defaulting to search"
             )
-            return "document_question"
+            return "search"
 
         logger.info(f"Query classified as: {result}")
         return result
 
     except Exception as e:
         logger.error(
-            f"classify_query failed — defaulting to document_question. Error: {e}",
+            f"classify_query failed — defaulting to search. Error: {e}",
             exc_info=True,
         )
-        return "document_question"
+        return "search"
 
 
 def generate_conversational_response(query: str, history: List[Dict] = None) -> str:

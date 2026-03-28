@@ -249,7 +249,8 @@ class VectorStore:
         user_message: str,
         assistant_message: str,
         turn_index: int,
-        sources: Optional[List[Dict]] = None,  # ← NEW
+        sources: Optional[List[Dict]] = None,
+        active_document_ids: Optional[List[str]] = None,
     ) -> bool:
         """
         Save a single conversation turn (user + assistant message pair).
@@ -261,6 +262,7 @@ class VectorStore:
             assistant_message: What the assistant responded
             turn_index: Turn number in the conversation (0, 1, 2...)
             sources: Optional list of reranked source dicts to persist alongside the turn
+            active_document_ids: Document IDs the user had selected for this turn
 
         Returns:
             True if saved successfully
@@ -282,7 +284,8 @@ class VectorStore:
                 "user_id": user_id,
                 "turn_index": turn_index,
                 "timestamp": int(time.time()),
-                "sources_json": json.dumps(sources or []),  # ← NEW
+                "sources_json": json.dumps(sources or []),
+                "active_document_ids_json": json.dumps(active_document_ids or []),
             }
 
             collection.add(
@@ -332,8 +335,10 @@ class VectorStore:
                 turn_data = json.loads(results["documents"][i])
                 meta = results["metadatas"][i]
                 turn_data["turn_index"] = meta["turn_index"]
-                # ── NEW: restore sources from metadata ──────────────────────
                 turn_data["sources"] = json.loads(meta.get("sources_json", "[]"))
+                turn_data["active_document_ids"] = json.loads(
+                    meta.get("active_document_ids_json", "[]")
+                )
                 turns.append(turn_data)
 
             turns.sort(key=lambda t: t["turn_index"])

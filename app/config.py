@@ -38,6 +38,7 @@ class Settings:
 
     # chat routing stuff
     SIMILARITY_THRESHOLD: float = float(os.getenv("SIMILARITY_THRESHOLD", "0.3"))
+    RERANK_SCORE_THRESHOLD: float = float(os.getenv("RERANK_SCORE_THRESHOLD", "-5.0"))
 
     # openrouter shit
     LLM_PROVIDER: str = os.getenv("LLM_PROVIDER", "gemini")
